@@ -500,9 +500,14 @@ def solve(
     llm: LLM,
     task: str,
     on_event: Callable[[dict], None] | None = None,
+    lead: bool = False,
 ) -> Outcome:
-    """Run the agent, critique, retry with the critique. Return the best attempt."""
-    agent = Agent(cfg, llm, on_event=on_event)
+    """Run the agent, critique, retry with the critique. Return the best attempt.
+
+    `lead=True` gives the agent the delegate tool so it can fan work out to
+    subagents — useful for multi-part jobs like test-and-enhance runs.
+    """
+    agent = Agent(cfg, llm, on_event=on_event, lead=lead)
     history: list[tuple[Result, Verdict]] = []
     prompt = task
 

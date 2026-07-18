@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge-agent"
+version = "0.2.0"
+description = "Agentic loop that learns verified skills for driving binaries; runs against the Anthropic API or a fully local LLM"
+requires-python = ">=3.10"
+# No hard dependencies: the local provider is stdlib-only, so an offline
+# `pip install -e .` works with nothing but setuptools present.
+dependencies = []
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+dev = ["pytest"]
+
+[project.scripts]
+forge = "forge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["forge*"]

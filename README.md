@@ -50,7 +50,8 @@ That's usually the most valuable thing in the file.
 ## Quick start
 
 ```bash
-pip install -e .
+pip install -e .            # core has zero dependencies (local provider is stdlib-only)
+pip install -e .[anthropic] # only if using the hosted API
 export ANTHROPIC_API_KEY=sk-...
 
 # Learn a binary from its repo. Writes skills/<name>/SKILL.md
@@ -62,15 +63,56 @@ forge skills          # what it knows, and how well-verified
 # Do work. The learned skill is loaded automatically.
 forge solve "convert every csv under uploads/ to parquet, verify row counts match" \
       --exe ./target/release/widget --uploads ./data
+
+# Test an executable against its source, then implement + verify enhancements.
+forge enhance --exe ./target/release/widget --src ./widget-checkout \
+      --goal "tighten error handling; make --output actually work" -v
 ```
+
+## Fully local / offline
+
+Every command runs against a local model instead of the hosted API. Any
+OpenAI-compatible server works — Ollama, LM Studio, llama.cpp server, vLLM —
+and the client is stdlib-only, so nothing needs network access beyond loopback:
+
+```bash
+ollama pull qwen3-coder:30b          # once; any tool-calling-capable model
+
+forge learn   --provider local --model qwen3-coder:30b \
+              --exe ./bin/widget --repo /path/to/widget-checkout -v
+
+forge enhance --provider local --model qwen3-coder:30b \
+              --exe ./bin/widget --src /path/to/widget-checkout -v
+```
+
+What `--provider local` changes:
+
+- **Transport**: `LocalLLM` speaks the OpenAI chat/tools wire format over
+  `--base-url` (default `http://localhost:11434/v1`, Ollama's). Anthropic-only
+  knobs (adaptive thinking, effort, prompt caching) are accepted and ignored.
+- **Offline by default**: the `web_search` server tool is not advertised, and
+  `fetch_repo` accepts local checkout paths only (pass `--online` to relax).
+- **One model everywhere**: agent, evaluator, adjudicator, and summarizer all
+  default to `--model`; set `evaluator_model`/`utility_model` in `Config` to
+  split them across differently sized local models.
+- **Robust structured output**: skill drafting forces a tool call, and falls
+  back to parsing JSON out of prose for local models that ignore forced
+  tool choice.
+
+Pick a model that can call tools (qwen3 / qwen2.5-coder / llama3.1+ / mistral
+class); the whole loop is tool-driven. The local path is integration-tested
+end-to-end over real HTTP in `tests/test_local_llm.py`.
 
 Library use:
 
 ```python
-from forge import Config, AnthropicLLM, solve, acquire_skill
+from forge import Config, LocalLLM, make_llm, solve, acquire_skill
 
-cfg = Config(target_exe="./bin/widget", target_repo="https://github.com/acme/widget")
-llm = AnthropicLLM()
+cfg = Config(
+    workspace="work", target_exe="./bin/widget", target_repo="/path/to/checkout",
+    provider="local", agent_model="qwen3-coder:30b", offline=True,
+)
+llm = make_llm(cfg)                          # LocalLLM here; AnthropicLLM for provider="anthropic"
 
 acquire_skill(cfg, llm)                      # learn it once
 out = solve(cfg, llm, "process the inbox")   # then use it
@@ -84,11 +126,14 @@ print(out.result.answer, out.verdict.score)
 | `loop.py` | The agent loop. Tool dispatch, approval gating, budgets, `pause_turn`, audit trail, delegation. |
 | `orchestrate.py` | Subtask validation, read/write hazard scheduling, findings board. |
 | `acquire.py` | Recon → draft → **verify** → repair → commit. The skill-learning pipeline. |
-| `evaluator.py` | Fresh-context critic + retry orchestration. |
-| `sandbox.py` | Path confinement, command denylist, timeouts, output truncation. |
+| `evaluator.py` | Fresh-context critic + adjudication + retry orchestration. |
+| `sandbox.py` | Path confinement, write-set enforcement, command denylist, timeouts, truncation. |
 | `skillstore.py` | SKILL.md read/write, progressive-disclosure index. |
-| `tools/` | `read_file` `edit_file` `grep` `list_dir` `write_file` `run` `probe_exe` `fetch_repo` `skill_*` `delegate` `ask_lead` `post_finding` |
-| `llm.py` | Messages API wrapper: adaptive thinking, effort, streaming, retries, structured output. |
+| `tools/` | `read_file` `edit_file` `grep` `list_dir` `write_file` `run` `probe_exe` `fetch_repo` `skill_read` `delegate` `ask_lead` `post_finding` |
+| `llm.py` | `AnthropicLLM` (Messages API: adaptive thinking, effort, streaming, retries) and `LocalLLM` (OpenAI-compatible local servers, stdlib-only), behind one protocol. |
+| `config.py` | The one dataclass: provider, models, budgets, evaluation knobs, offline mode. |
+| `prompts.py` | Every system prompt in one place. |
+| `cli.py` | `forge learn / solve / enhance / skills`. |
 
 ### Why a hand-written loop
 
@@ -240,7 +285,11 @@ Verified in `test_compact.py`: `test_compaction_never_orphans_a_tool_use` and
 
 | Setting | Default | Note |
 |---|---|---|
-| `agent_model` | `claude-opus-4-8` | `claude-sonnet-5` is cheaper and close |
+| `provider` | `anthropic` | `local` = any OpenAI-compatible server, stdlib HTTP only |
+| `base_url` | `http://localhost:11434/v1` | local provider; Ollama's default |
+| `offline` | `False` | drops `web_search`, restricts `fetch_repo` to local paths; CLI forces it on for `local` |
+| `agent_model` | `claude-opus-4-8` | `claude-sonnet-5` is cheaper and close; for local, your served model |
+| `evaluator_model` / `utility_model` | `agent_model` | split across differently sized local models if you like |
 | `effort` / `retry_effort` | `medium` / `high` | escalate on review failure |
 | `max_eval_rounds` | 3 | `1` disables review entirely |
 | `critic_max_turns` | 8 | evidence queries the critic/adjudicator may make |
@@ -257,7 +306,7 @@ Verified in `test_compact.py`: `test_compaction_never_orphans_a_tool_use` and
 ## Tests
 
 ```bash
-pytest tests/ -q     # 145 passed
+pytest tests/ -q     # 154 passed
 ```
 
 No API key needed — the LLM is scripted, but the sandbox and the binary are real, so

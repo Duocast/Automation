@@ -446,12 +446,22 @@ def test_solve_retries_on_revise_then_passes(env):
     ]
 
     class Scripted:
+        """Routes on the submit tool offered, like the fakes in test_evaluator.py.
+        (Keying on tool_choice was a bug: the critic and adjudicator submit via
+        named tools inside the investigation loop, without a forced choice.)"""
+
         def __init__(self):
             self.prompts: list[str] = []
             self.v = 0
 
         def call(self, **kw):
-            if kw.get("tool_choice"):
+            names = {t.get("name") for t in (kw.get("tools") or [])}
+            if "submit_rulings" in names:   # adjudicator: uphold the accusation
+                return Reply([tool_use("submit_rulings", {"rulings": [
+                    {"claim_id": 1, "ruling": "unsupported",
+                     "evidence": "no successful run anywhere in the log"}]})],
+                    "tool_use", Usage(1, 1))
+            if "submit_verdict" in names:   # critic
                 out = verdicts[self.v]
                 self.v += 1
                 return Reply([tool_use("submit_verdict", out)], "tool_use", Usage(1, 1))

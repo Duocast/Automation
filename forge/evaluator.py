@@ -432,9 +432,14 @@ def _adjudicate(
 def evaluate(cfg: Config, llm: LLM, task: str, result: Result) -> Verdict:
     raw, checks = _run_critic(cfg, llm, task, result)
 
+    # The critic's output crosses a trust boundary; a junk score must not crash solve().
+    try:
+        score = int(raw.get("score", 5) or 5)
+    except (TypeError, ValueError):
+        score = 5
     v = Verdict(
-        verdict=raw.get("verdict", "revise"),
-        score=int(raw.get("score", 5) or 5),
+        verdict=str(raw.get("verdict", "revise") or "revise"),
+        score=min(10, max(1, score)),
         critique=raw.get("critique", ""),
         required_fixes=[str(f) for f in (raw.get("required_fixes") or []) if str(f).strip()],
         unsupported_claims=[str(c) for c in (raw.get("unsupported_claims") or []) if str(c).strip()],
@@ -495,9 +500,14 @@ def solve(
     llm: LLM,
     task: str,
     on_event: Callable[[dict], None] | None = None,
+    lead: bool = False,
 ) -> Outcome:
-    """Run the agent, critique, retry with the critique. Return the best attempt."""
-    agent = Agent(cfg, llm, on_event=on_event)
+    """Run the agent, critique, retry with the critique. Return the best attempt.
+
+    `lead=True` gives the agent the delegate tool so it can fan work out to
+    subagents — useful for multi-part jobs like test-and-enhance runs.
+    """
+    agent = Agent(cfg, llm, on_event=on_event, lead=lead)
     history: list[tuple[Result, Verdict]] = []
     prompt = task
 

@@ -119,13 +119,16 @@ def batches(subtasks: list[Subtask]) -> list[list[Subtask]]:
     """
     out: list[list[Subtask]] = []
     for st in subtasks:
-        placed = False
-        for batch in out:
-            if all(conflicts(st, other) is None for other in batch):
-                batch.append(st)
-                placed = True
-                break
-        if not placed:
+        # Place after the LAST batch holding a conflict. First-fit would be wrong:
+        # putting st into an earlier conflict-free batch runs it BEFORE a conflicting
+        # subtask that came first in the list, inverting the declared write order.
+        last_conflict = -1
+        for i, batch in enumerate(out):
+            if any(conflicts(st, other) is not None for other in batch):
+                last_conflict = i
+        if last_conflict + 1 < len(out):
+            out[last_conflict + 1].append(st)
+        else:
             out.append([st])
     return out
 

@@ -86,11 +86,20 @@ class Sandbox:
         read_roots: list[Path] | None = None,
         allow_network: bool = False,
         default_timeout: int = 60,
+        write_allowlist: list[Path] | None = None,
     ):
         self.workspace = Path(workspace).resolve()
         self.read_roots = [Path(p).resolve() for p in (read_roots or [])]
         self.allow_network = allow_network
         self.default_timeout = default_timeout
+        # None means "anywhere in the workspace". A list confines writes to those
+        # paths (a directory covers its subtree) — how a subagent's declared
+        # write set is enforced rather than trusted. Never loosens the workspace
+        # boundary: an allowlist entry outside the workspace grants nothing.
+        self.write_allowlist = (
+            None if write_allowlist is None
+            else [Path(p).resolve() for p in write_allowlist]
+        )
         self.workspace.mkdir(parents=True, exist_ok=True)
 
     # --- paths -------------------------------------------------------------
@@ -107,6 +116,14 @@ class Sandbox:
             raise SandboxError(
                 f"write denied: {p} is outside the workspace ({self.workspace}). "
                 "Write inside the workspace."
+            )
+        if self.write_allowlist is not None and not any(
+            self._within(p, a) for a in self.write_allowlist
+        ):
+            allowed = ", ".join(str(a) for a in self.write_allowlist)
+            raise SandboxError(
+                f"write denied: {p} is outside your declared write set ({allowed}). "
+                "Write only the paths you declared, or use your scratch directory."
             )
         return p
 

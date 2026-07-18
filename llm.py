@@ -46,7 +46,7 @@ class Reply:
         parts = []
         for b in self.content:
             if _btype(b) == "text":
-                parts.append(_battr(b, "text"))
+                parts.append(_battr(b, "text") or "")
         return "\n".join(parts).strip()
 
     def tool_uses(self) -> list[Any]:

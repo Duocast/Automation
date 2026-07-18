@@ -432,9 +432,14 @@ def _adjudicate(
 def evaluate(cfg: Config, llm: LLM, task: str, result: Result) -> Verdict:
     raw, checks = _run_critic(cfg, llm, task, result)
 
+    # The critic's output crosses a trust boundary; a junk score must not crash solve().
+    try:
+        score = int(raw.get("score", 5) or 5)
+    except (TypeError, ValueError):
+        score = 5
     v = Verdict(
-        verdict=raw.get("verdict", "revise"),
-        score=int(raw.get("score", 5) or 5),
+        verdict=str(raw.get("verdict", "revise") or "revise"),
+        score=min(10, max(1, score)),
         critique=raw.get("critique", ""),
         required_fixes=[str(f) for f in (raw.get("required_fixes") or []) if str(f).strip()],
         unsupported_claims=[str(c) for c in (raw.get("unsupported_claims") or []) if str(c).strip()],
